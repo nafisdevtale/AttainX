@@ -5,12 +5,20 @@ import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parent
-BUNDLE = ROOT / "obe-source.zip"
+BUNDLE_CANDIDATES = (
+    ROOT / "obe-source.zip",
+    ROOT / "obe-source (1).zip",
+)
+BUNDLE = next((path for path in BUNDLE_CANDIDATES if path.is_file()), None)
+
 EXTRACT_ROOT = Path("/tmp/attainx-source")
 APP_DIR = EXTRACT_ROOT / "obe-po-attainment-dashboard-github"
 APP_FILE = APP_DIR / "app.py"
 
 if not APP_FILE.is_file():
+    if BUNDLE is None:
+        expected = ", ".join(path.name for path in BUNDLE_CANDIDATES)
+        raise FileNotFoundError(f"AttainX source archive not found. Expected one of: {expected}")
     EXTRACT_ROOT.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(BUNDLE) as archive:
         archive.extractall(EXTRACT_ROOT)
