@@ -1,6 +1,7 @@
 """Vercel entry point for Smart CO PO AttainX."""
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+import csv
 import io
 import re
 import sys
@@ -325,5 +326,163 @@ if dashboard_template.is_file():
                 + template_text[co_table_end:]
             )
     dashboard_template.write_text(template_text, encoding="utf-8")
+
+
+# OLD POs (11), CO(6): generate dedicated 11-PO mapping templates and
+# enforce the same 6-CO / 11-PO structure in processing and output.
+def _write_old_pos_11_template(source_name, target_name):
+    static_dir = APP_DIR / "public" / "static"
+    source_path = static_dir / source_name
+    target_path = static_dir / target_name
+    with source_path.open("r", newline="", encoding="utf-8-sig") as source_file:
+        rows = list(csv.reader(source_file))
+
+    header_index = next(
+        (
+            index for index, row in enumerate(rows)
+            if any(str(cell).strip().upper() == "PO12" for cell in row)
+        ),
+        None,
+    )
+    if header_index is None:
+        raise RuntimeError(f"Cannot build {target_name}: PO12 header not found in {source_name}.")
+
+    po12_index = next(
+        index for index, cell in enumerate(rows[header_index])
+        if str(cell).strip().upper() == "PO12"
+    )
+    trimmed_rows = [
+        [cell for index, cell in enumerate(row) if index != po12_index]
+        for row in rows
+    ]
+
+    headers = [str(cell).strip().upper() for cell in trimmed_rows[header_index]]
+    expected_pos = [f"PO{number}" for number in range(1, 12)]
+    missing_pos = [po for po in expected_pos if po not in headers]
+    if missing_pos or "PO12" in headers:
+        raise RuntimeError(
+            f"Invalid generated template {target_name}: expected PO1-PO11 only; "
+            f"missing={missing_pos}, contains_PO12={'PO12' in headers}."
+        )
+
+    co_rows = [
+        row for row in trimmed_rows[header_index + 1:]
+        if row and str(row[0]).strip().upper().startswith("C")
+    ]
+    if len(co_rows) != 6:
+        raise RuntimeError(
+            f"Invalid generated template {target_name}: expected exactly 6 CO rows, found {len(co_rows)}."
+        )
+
+    with target_path.open("w", newline="", encoding="utf-8") as target_file:
+        csv.writer(target_file, lineterminator="\n").writerows(trimmed_rows)
+
+
+static_dir = APP_DIR / "public" / "static"
+_write_old_pos_11_template("mapping_template.csv", "mapping_11po_template.csv")
+_write_old_pos_11_template(
+    "mapping_practical_template.csv",
+    "mapping_11po_practical_template.csv",
+)
+
+_original_old_pos_calculator = _module.calculate_dashboard_old_pos
+
+
+def _calculate_old_pos_with_11po_guard(
+    mapping_file, direct_file, indirect_file, base_threshold,
+    has_practical, exclude_po12=False
+):
+    result = _original_old_pos_calculator(
+        mapping_file, direct_file, indirect_file, base_threshold,
+        has_practical, exclude_po12=exclude_po12
+    )
+    if not exclude_po12:
+        return result
+
+    results, df_map, df_direct, df_survey, co_statements, practical_statements = result
+    co_columns = [column for column in df_map.columns if "CO" in str(column).upper()]
+    if not co_columns:
+        raise ValueError("The Old POs (11), CO(6) mapping sheet must contain a CO Codes column.")
+
+    co_column = co_columns[0]
+    co_mask = (
+        df_map[co_column].astype(str).str.strip().str.upper().str.startswith("C", na=False)
+    )
+    co_count = int(co_mask.sum())
+    if co_count != 6:
+        raise ValueError(
+            f"OLD POs (11), CO(6) requires exactly 6 Course Outcomes; "
+            f"the uploaded mapping sheet contains {co_count}."
+        )
+
+    expected_pos = {f"PO{number}" for number in range(1, 12)}
+    present_pos = {
+        str(column).strip().upper()
+        for column in df_map.columns
+        if re.fullmatch(r"PO\d+", str(column).strip().upper())
+    }
+    missing_pos = sorted(
+        expected_pos - present_pos,
+        key=lambda value: int(value[2:])
+    )
+    if missing_pos:
+        raise ValueError(
+            "OLD POs (11), CO(6) requires mapping columns PO1 through PO11. "
+            f"Missing columns: {', '.join(missing_pos)}."
+        )
+
+    columns_to_keep = [
+        column for column in df_map.columns
+        if not re.fullmatch(r"PO\d+", str(column).strip().upper())
+        or str(column).strip().upper() in expected_pos
+    ]
+    df_map = df_map.loc[:, columns_to_keep].copy()
+    results = [
+        row for row in results
+        if str(row.get("po", "")).strip().upper() in expected_pos
+        or str(row.get("po", "")).strip().upper() in {"PSO1", "PSO2", "PSO3"}
+    ]
+    return results, df_map, df_direct, df_survey, co_statements, practical_statements
+
+
+_module.calculate_dashboard_old_pos = _calculate_old_pos_with_11po_guard
+
+if upload_template.is_file():
+    template_text = upload_template.read_text(encoding="utf-8")
+    template_text = template_text.replace(
+        "OLD POs (11), CO(6) (Exclude PO12)",
+        "OLD POs (11), CO(6)",
+    )
+
+    old_pos_11_template_branch = "\n".join([
+        '            if (poFormatSelect === "old_pos_11") {',
+        '                indirectLink.href = "/static/indirect_template.csv";',
+        '                indirectLink.setAttribute("download", "indirect_template.csv");',
+        '',
+        '                if (practicalSelect === "yes") {',
+        '                    mappingLink.href = "/static/mapping_11po_practical_template.csv";',
+        '                    directLink.href = "/static/direct_practical_template.csv";',
+        '                    mappingLink.setAttribute("download", "mapping_11po_practical_template.csv");',
+        '                    directLink.setAttribute("download", "direct_practical_template.csv");',
+        '                    mappingLink.innerHTML = "📥 Practical Mapping (11 POs)";',
+        '                    directLink.innerHTML = "📥 Practical Marks";',
+        '                } else {',
+        '                    mappingLink.href = "/static/mapping_11po_template.csv";',
+        '                    directLink.href = "/static/direct_template.csv";',
+        '                    mappingLink.setAttribute("download", "mapping_11po_template.csv");',
+        '                    directLink.setAttribute("download", "direct_template.csv");',
+        '                    mappingLink.innerHTML = "📥 Blank Template (11 POs)";',
+        '                    directLink.innerHTML = "📥 Blank Template";',
+        '                }',
+        '            } else if (poFormatSelect === "new_pos") {',
+    ])
+
+    new_pos_anchor = '            if (poFormatSelect === "new_pos") {'
+    if 'if (poFormatSelect === "old_pos_11")' not in template_text:
+        if new_pos_anchor not in template_text:
+            raise RuntimeError("Could not find the template toggle insertion point for OLD POs (11), CO(6).")
+        template_text = template_text.replace(new_pos_anchor, old_pos_11_template_branch, 1)
+
+    upload_template.write_text(template_text, encoding="utf-8")
 
 app = _module.app
