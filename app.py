@@ -332,12 +332,25 @@ if upload_template.is_file():
         '        const subjectData = {\n'
         '            "theory": {\n'
         '                "FY B Tech": [\n'
-        '                    { code: "ET124ES103", name: "Electrical and Electronics engineering", subject_code: "ET124ES103", subject_name: "Electrical and Electronics engineering" }\n'
+        '                    "ET124ES103 \u2014 Electrical and Electronics engineering"\n'
         '                ],\n'
         '                "SE": [\n'
     )
     if old_theory_start in template_text:
         template_text = template_text.replace(old_theory_start, new_theory_start, 1)
+
+    old_fy_theory_obj = (
+        '                "FY B Tech": [\n'
+        '                    { code: "ET124ES103", name: "Electrical and Electronics engineering", subject_code: "ET124ES103", subject_name: "Electrical and Electronics engineering" }\n'
+        '                ],\n'
+    )
+    new_fy_theory_str = (
+        '                "FY B Tech": [\n'
+        '                    "ET124ES103 \u2014 Electrical and Electronics engineering"\n'
+        '                ],\n'
+    )
+    if old_fy_theory_obj in template_text:
+        template_text = template_text.replace(old_fy_theory_obj, new_fy_theory_str, 1)
 
     old_project_start = '            "project": {\n                "SE": [\n'
     new_project_start = '            "project": {\n                "FY B Tech": [],\n                "SE": [\n'
@@ -348,12 +361,25 @@ if upload_template.is_file():
     new_practical_start = (
         '            "practical": {\n'
         '                "FY B Tech": [\n'
-        '                    { code: "ET124ES105", name: "Electrical and Electronics engineering", subject_code: "ET124ES105", subject_name: "Electrical and Electronics engineering" }\n'
+        '                    "ET124ES105 \u2014 Electrical and Electronics engineering"\n'
         '                ],\n'
         '                "SY B Tech": [\n'
     )
     if old_practical_start in template_text:
         template_text = template_text.replace(old_practical_start, new_practical_start, 1)
+
+    old_fy_practical_obj = (
+        '                "FY B Tech": [\n'
+        '                    { code: "ET124ES105", name: "Electrical and Electronics engineering", subject_code: "ET124ES105", subject_name: "Electrical and Electronics engineering" }\n'
+        '                ],\n'
+    )
+    new_fy_practical_str = (
+        '                "FY B Tech": [\n'
+        '                    "ET124ES105 \u2014 Electrical and Electronics engineering"\n'
+        '                ],\n'
+    )
+    if old_fy_practical_obj in template_text:
+        template_text = template_text.replace(old_fy_practical_obj, new_fy_practical_str, 1)
 
     old_update_loop = (
         '            if (subjectData[courseType] && subjectData[courseType][selectedClass]) {\n'
@@ -370,8 +396,9 @@ if upload_template.is_file():
         '                subjectData[courseType][selectedClass].forEach(function(subject) {\n'
         '                    const option = document.createElement("option");\n'
         '                    if (typeof subject === "object" && subject !== null) {\n'
-        '                        option.value = subject.code || subject.subject_code || subject.name;\n'
-        '                        option.text = subject.name || subject.subject_name;\n'
+        '                        const label = subject.label || (subject.code && subject.name ? subject.code + " \u2014 " + subject.name : (subject.code || subject.name));\n'
+        '                        option.value = label;\n'
+        '                        option.text = label;\n'
         '                        if (subject.code || subject.subject_code) {\n'
         '                            option.setAttribute("data-code", subject.code || subject.subject_code);\n'
         '                        }\n'
@@ -381,6 +408,11 @@ if upload_template.is_file():
         '                    } else {\n'
         '                        option.value = subject;\n'
         '                        option.text = subject;\n'
+        '                        if (typeof subject === "string" && subject.includes(" \u2014 ")) {\n'
+        '                            const parts = subject.split(" \u2014 ");\n'
+        '                            option.setAttribute("data-code", parts[0].trim());\n'
+        '                            option.setAttribute("data-name", parts[1].trim());\n'
+        '                        }\n'
         '                    }\n'
         '                    subjectSelect.appendChild(option);\n'
         '                });\n'
