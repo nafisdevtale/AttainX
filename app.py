@@ -17,7 +17,7 @@ EXTRACT_ROOT = Path("/tmp/attainx-source")
 APP_DIR = EXTRACT_ROOT / "obe-po-attainment-dashboard-github"
 APP_FILE = APP_DIR / "app.py"
 
-if not APP_FILE.is_file():
+if not APP_FILE.is_file() or (BUNDLE is not None and BUNDLE.stat().st_mtime > APP_FILE.stat().st_mtime):
     if BUNDLE is None:
         expected = ", ".join(path.name for path in BUNDLE_CANDIDATES)
         raise FileNotFoundError(f"AttainX source archive not found. Expected one of: {expected}")
