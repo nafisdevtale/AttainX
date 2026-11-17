@@ -292,14 +292,102 @@ if upload_template.is_file():
 
     existing_teacher = '                <option value="Mrs. A. S. Nandangaon">Mrs. A. S. Nandangaon</option>\n'
     new_teachers = (
-        '                <option value="Dr. Hniee Williams">Dr. Hniee Williams</option>\n'
+        '                <option value="Dr. Hnnie Williams">Dr. Hnnie Williams</option>\n'
         '                <option value="Dr. Yogita Talekar">Dr. Yogita Talekar</option>\n'
         '                <option value="Miss. Prachi Bhende">Miss. Prachi Bhende</option>\n'
     )
-    if existing_teacher in template_text and new_teachers not in template_text:
+    if "Dr. Hniee Williams" in template_text:
+        template_text = template_text.replace("Dr. Hniee Williams", "Dr. Hnnie Williams")
+    elif existing_teacher in template_text and new_teachers not in template_text:
         template_text = template_text.replace(
             existing_teacher, existing_teacher + new_teachers, 1
         )
+
+    old_class_select = (
+        '            <select name="class_name" id="class_select" onchange="updateSubjects()" required>\n'
+        '                <option value="" disabled selected>-- Select Class --</option>\n'
+        '                <option value="SE">SE (Second Year)</option>\n'
+        '                <option value="SY B Tech">SY B Tech</option>\n'
+        '                <option value="TY B Tech">TY B Tech</option>\n'
+        '                <option value="TE">TE (Third Year)</option>\n'
+        '                <option value="BE">BE (Final Year)</option>\n'
+        '            </select>'
+    )
+    new_class_select = (
+        '            <select name="class_name" id="class_select" onchange="updateSubjects()" required>\n'
+        '                <option value="" disabled selected>-- Select Class --</option>\n'
+        '                <option value="FY B Tech">FY B Tech</option>\n'
+        '                <option value="SE">SE (Second Year)</option>\n'
+        '                <option value="SY B Tech">SY B Tech</option>\n'
+        '                <option value="TY B Tech">TY B Tech</option>\n'
+        '                <option value="TE">TE (Third Year)</option>\n'
+        '                <option value="BE">BE (Final Year)</option>\n'
+        '            </select>'
+    )
+    if old_class_select in template_text:
+        template_text = template_text.replace(old_class_select, new_class_select, 1)
+
+    old_theory_start = '        const subjectData = {\n            "theory": {\n                "SE": [\n'
+    new_theory_start = (
+        '        const subjectData = {\n'
+        '            "theory": {\n'
+        '                "FY B Tech": [\n'
+        '                    { code: "ET124ES103", name: "Electrical and Electronics engineering", subject_code: "ET124ES103", subject_name: "Electrical and Electronics engineering" }\n'
+        '                ],\n'
+        '                "SE": [\n'
+    )
+    if old_theory_start in template_text:
+        template_text = template_text.replace(old_theory_start, new_theory_start, 1)
+
+    old_project_start = '            "project": {\n                "SE": [\n'
+    new_project_start = '            "project": {\n                "FY B Tech": [],\n                "SE": [\n'
+    if old_project_start in template_text:
+        template_text = template_text.replace(old_project_start, new_project_start, 1)
+
+    old_practical_start = '            "practical": {\n                "SY B Tech": [\n'
+    new_practical_start = (
+        '            "practical": {\n'
+        '                "FY B Tech": [\n'
+        '                    { code: "ET124ES105", name: "Electrical and Electronics engineering", subject_code: "ET124ES105", subject_name: "Electrical and Electronics engineering" }\n'
+        '                ],\n'
+        '                "SY B Tech": [\n'
+    )
+    if old_practical_start in template_text:
+        template_text = template_text.replace(old_practical_start, new_practical_start, 1)
+
+    old_update_loop = (
+        '            if (subjectData[courseType] && subjectData[courseType][selectedClass]) {\n'
+        '                subjectData[courseType][selectedClass].forEach(function(subject) {\n'
+        '                    const option = document.createElement("option");\n'
+        '                    option.value = subject;\n'
+        '                    option.text = subject;\n'
+        '                    subjectSelect.appendChild(option);\n'
+        '                });\n'
+        '            }'
+    )
+    new_update_loop = (
+        '            if (subjectData[courseType] && subjectData[courseType][selectedClass]) {\n'
+        '                subjectData[courseType][selectedClass].forEach(function(subject) {\n'
+        '                    const option = document.createElement("option");\n'
+        '                    if (typeof subject === "object" && subject !== null) {\n'
+        '                        option.value = subject.code || subject.subject_code || subject.name;\n'
+        '                        option.text = subject.name || subject.subject_name;\n'
+        '                        if (subject.code || subject.subject_code) {\n'
+        '                            option.setAttribute("data-code", subject.code || subject.subject_code);\n'
+        '                        }\n'
+        '                        if (subject.name || subject.subject_name) {\n'
+        '                            option.setAttribute("data-name", subject.name || subject.subject_name);\n'
+        '                        }\n'
+        '                    } else {\n'
+        '                        option.value = subject;\n'
+        '                        option.text = subject;\n'
+        '                    }\n'
+        '                    subjectSelect.appendChild(option);\n'
+        '                });\n'
+        '            }'
+    )
+    if old_update_loop in template_text:
+        template_text = template_text.replace(old_update_loop, new_update_loop, 1)
 
     template_text = template_text.replace(
         '            if (poFormatSelect === "new_pos") {\n                // New POs are direct-only; the survey upload is hidden and optional.\n',
