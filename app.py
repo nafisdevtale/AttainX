@@ -183,7 +183,10 @@ def _calculate_new_pos_with_survey(
     mapping_weights = {}
     for po_column in po_columns:
         weights = [_module.parse_mapping_value(value) for value in theory_rows[po_column].tolist()]
-        numeric_weights = [0.0 if value is None else float(value) for value in weights]
+        numeric_weights = [
+            0.0 if (value is None or float(value) <= 0) else float(value)
+            for value in weights
+        ]
         weight_total = float(sum(numeric_weights))
         if weight_total <= 0:
             mapping_weights[po_column] = (0.0, 0.0)
@@ -205,7 +208,7 @@ def _calculate_new_pos_with_survey(
         weight_total, indirect_po_raw = mapping_weights.get(match, (0.0, 0.0))
         if weight_total <= 0:
             row.update({
-                "direct": "0.0000", "indirect": "0.0000",
+                "target": "0.00", "direct": "0.0000", "indirect": "0.0000",
                 "final": "0.0000", "percentage": "0.00",
             })
             continue
