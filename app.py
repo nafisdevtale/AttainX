@@ -287,6 +287,17 @@ if upload_template.is_file():
             existing_course, existing_course + vocational_course, 1
         )
 
+    existing_teacher = '                <option value="Mrs. A. S. Nandangaon">Mrs. A. S. Nandangaon</option>\n'
+    new_teachers = (
+        '                <option value="Dr. Hniee Williams">Dr. Hniee Williams</option>\n'
+        '                <option value="Dr. Yogita Talekar">Dr. Yogita Talekar</option>\n'
+        '                <option value="Miss. Prachi Bhende">Miss. Prachi Bhende</option>\n'
+    )
+    if existing_teacher in template_text and new_teachers not in template_text:
+        template_text = template_text.replace(
+            existing_teacher, existing_teacher + new_teachers, 1
+        )
+
     template_text = template_text.replace(
         '            if (poFormatSelect === "new_pos") {\n                // New POs are direct-only; the survey upload is hidden and optional.\n',
         '            if (poFormatSelect === "new_pos") {\n'
