@@ -323,6 +323,40 @@ if dashboard_template.is_file():
         "Final PO Attainment / PO Mapping × 100 for {{ row.po }}; not capped",
     )
 
+    old_co_summary_tbody = (
+        '            <tbody>\n'
+        '                <tr>\n'
+        '                    <td rowspan="2" style="font-weight: bold; background-color: #f8f9fa; font-size: 16px; text-align: center !important; vertical-align: middle;">{{ subject }}</td>\n'
+        '                    \n'
+        '                    <td style="color: #0056b3; text-align: left !important;"><strong data-tooltip="{{ direct_formula_tooltip }}">Direct {% if is_direct_only %}(100%){% else %}(80%){% endif %}</strong></td>\n'
+        '                    {% for co in co_statements %}\n'
+        '                        <td style="color: #0056b3; text-align: center !important;" data-tooltip="Direct Exam Score for {{ co.code }}">{{ co.direct }}</td>\n'
+        '                    {% endfor %}\n'
+        '                </tr>\n'
+        '                \n'
+        '                \n'
+        '                <tr>\n'
+        '                    <td style="background-color: #e9ecef; text-align: left !important;"><strong data-tooltip="Formula: {% if is_direct_only %}Direct CO (100%){% else %}(0.80 × Direct CO) + (0.20 × Indirect CO){% endif %}">Final CO Attainment</strong></td>\n'
+        '                    {% for co in co_statements %}\n'
+        '                        <td style="font-weight: bold; background-color: #e9ecef; font-size: 15px; text-align: center !important;" data-tooltip="Final blended score for {{ co.code }}">{{ co.final }}</td>\n'
+        '                    {% endfor %}\n'
+        '                </tr>\n'
+        '            </tbody>'
+    )
+    new_co_summary_tbody = (
+        '            <tbody>\n'
+        '                <tr>\n'
+        '                    <td style="font-weight: bold; background-color: #f8f9fa; font-size: 16px; text-align: center !important; vertical-align: middle;">{{ subject }}</td>\n'
+        '                    <td style="background-color: #e9ecef; text-align: left !important;"><strong>Final CO Attainment</strong></td>\n'
+        '                    {% for co in co_statements %}\n'
+        '                        <td style="font-weight: bold; background-color: #e9ecef; color: #0056b3; font-size: 15px; text-align: center !important;" data-tooltip="Direct Exam Score for {{ co.code }}">{{ co.direct }}</td>\n'
+        '                    {% endfor %}\n'
+        '                </tr>\n'
+        '            </tbody>'
+    )
+    if old_co_summary_tbody in template_text:
+        template_text = template_text.replace(old_co_summary_tbody, new_co_summary_tbody, 1)
+
     # Keep the PO Indirect row and survey appendix, but hide the CO-summary
     # Indirect column as previously requested.
     co_summary_marker = "CO Attainment Summary"
