@@ -342,10 +342,15 @@ def extract_cos_from_mapping(mapping_source):
     for row in rows[header_idx + 1:]:
         if row and len(row) > co_col_idx:
             val = str(row[co_col_idx]).strip()
-            if val and val.upper().startswith("C"):
+            val_u = val.upper()
+            if not val or val_u in ("-", "NAN", "NONE"):
+                continue
+            if any(kw in val_u for kw in ("TOTAL", "TARGET", "AVERAGE", "WEIGHT", "PRACTICAL", "STATEMENT")):
+                continue
+            if val_u.startswith("C") or re.match(r"^[A-Z0-9_-]+[._-]?\d+$", val_u):
                 co_codes.append(val)
     if not co_codes:
-        raise ValueError("No Course Outcomes starting with 'C' found in the mapping sheet.")
+        raise ValueError("No Course Outcomes found in the mapping sheet.")
     return co_codes
 
 
