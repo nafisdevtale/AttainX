@@ -138,25 +138,196 @@ _module.target_attainment_percentage = _uncapped_target_attainment_percentage
 _original_new_pos = _module.calculate_dashboard_new_pos
 
 
-def _find_survey_header_row(raw_frame):
+METADATA_COLUMN_PATTERNS = [
+    r'^(?:SR\.?\s*NO\.?|S\.?\s*NO\.?|SERIAL\s*NO\.?|SR_NO)$',
+    r'^(?:NAME|STUDENT\s*NAME|CANDIDATE\s*NAME)$',
+    r'^(?:ROLL\s*NO\.?|ROLL\s*NUMBER|REG\.?\s*NO\.?|PRN|UID|ID)$',
+    r'^(?:TIMESTAMP|TIME|DATE)$',
+    r'^(?:EMAIL|EMAIL\s*ADDRESS)$',
+    r'^(?:FEEDBACK|COMMENT|COMMENTS|REMARK|REMARKS|SUGGESTION|SUGGESTIONS)$',
+    r'^(?:CLASS|DIVISION|DIV|BRANCH|YEAR|SEMESTER|SEM)$',
+]
+
+
+def is_metadata_column(col_name):
+    norm = str(col_name).strip().upper()
+    return any(re.match(p, norm) for p in METADATA_COLUMN_PATTERNS)
+
+
+def is_candidate_co_column(col_name):
+    s = str(col_name).strip().upper()
+    if not s or s.startswith("UNNAMED") or is_metadata_column(s):
+        return False
+    if re.search(r'\bCO\s*[-_.]?\s*\d+', s):
+        return True
+    if re.search(r'\bC\s*[-_.]?\s*\d+', s):
+        return True
+    if re.search(r'\bCOURSE\s*OUTCOME\s*[-_.]?\s*\d+', s):
+        return True
+    if re.match(r'^C[A-Z0-9_-]*[._-]?\d+$', s):
+        return True
+    return False
+
+
+def normalize_co_key(s):
+    return re.sub(r'[^A-Z0-9]', '', str(s).strip().upper())
+
+
+def extract_co_index(s):
+    s_clean = str(s).strip().upper()
+    m = re.search(r'\b(?:CO|COURSE\s*OUTCOME)\s*[-_.]?\s*(\d+)', s_clean)
+    if m:
+        return int(m.group(1))
+    m = re.search(r'\bC[A-Z0-9_-]*[._-](\d+)', s_clean)
+    if m:
+        return int(m.group(1))
+    m = re.search(r'\bC\s*[-_.]?\s*(\d+)', s_clean)
+    if m:
+        return int(m.group(1))
+    m = re.search(r'(\d+)\s*$', s_clean)
+    if m:
+        return int(m.group(1))
+    m = re.search(r'(\d+)', s_clean)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def find_survey_header_row(rows):
     candidates = []
-    for index, row in raw_frame.iterrows():
-        values = [str(value).strip().upper() for value in row.tolist()]
-        co_columns = [
-            value for value in values
-            if re.match(r"^C[A-Z0-9_-]*[._-]?\d+$", value)
-        ]
-        if co_columns:
-            candidates.append((index, len(co_columns)))
+    for idx, row in enumerate(rows):
+        co_count = sum(1 for val in row if is_candidate_co_column(val))
+        if co_count > 0:
+            candidates.append((idx, co_count))
     if not candidates:
         raise ValueError(
-            "The New-PO Survey Sheet must contain CO columns (for example, C401.1, C401.2, etc.)."
+            "The Survey Sheet must contain Course Outcome (CO) rating columns (e.g., C301.1, CO1, CO 1, etc.)."
         )
-    return max(candidates, key=lambda item: (item[1], -item[0]))[0]
+    return max(candidates, key=lambda x: (x[1], -x[0]))[0]
+
+
+def align_survey_columns(survey_columns, mapped_cos):
+    number_of_cos = len(mapped_cos)
+    if number_of_cos == 0:
+        raise ValueError("No CO statements were found in the mapping sheet.")
+
+    candidate_cols = [c for c in survey_columns if is_candidate_co_column(c)]
+    if not candidate_cols:
+        non_meta = [
+            c for c in survey_columns
+            if not is_metadata_column(c) and not str(c).strip().upper().startswith("UNNAMED")
+        ]
+        if len(non_meta) == number_of_cos:
+            candidate_cols = non_meta
+
+    if len(candidate_cols) < number_of_cos:
+        missing_co = mapped_cos[len(candidate_cols)] if len(candidate_cols) < len(mapped_cos) else mapped_cos[-1]
+        cand_indices = {extract_co_index(c) for c in candidate_cols if extract_co_index(c) is not None}
+        for co in mapped_cos:
+            idx = extract_co_index(co)
+            if idx is not None and idx not in cand_indices:
+                missing_co = co
+                break
+        raise ValueError(
+            f"The Survey Sheet contains {len(candidate_cols)} CO columns, but the mapping sheet has {number_of_cos} COs. "
+            f"Missing survey column for mapped CO: {missing_co}."
+        )
+
+    # Strategy 1: Exact or Normalized Code Match
+    norm_survey_map = {normalize_co_key(c): c for c in candidate_cols}
+    exact_matches = []
+    all_exact = True
+    for co in mapped_cos:
+        k = normalize_co_key(co)
+        if k in norm_survey_map:
+            exact_matches.append(norm_survey_map[k])
+        else:
+            all_exact = False
+            break
+    if all_exact and len(exact_matches) == number_of_cos:
+        return exact_matches
+
+    # Strategy 2: Match by CO index (handles different prefixes, e.g. C410A.1 vs C301.1 or CO1)
+    col_by_index = {}
+    for c in candidate_cols:
+        idx = extract_co_index(c)
+        if idx is not None and idx not in col_by_index:
+            col_by_index[idx] = c
+
+    index_matches = []
+    all_indexed = True
+    missing_co_by_index = None
+    for co in mapped_cos:
+        idx = extract_co_index(co)
+        if idx is not None and idx in col_by_index:
+            index_matches.append(col_by_index[idx])
+        else:
+            all_indexed = False
+            missing_co_by_index = co
+            break
+
+    if all_indexed and len(index_matches) == number_of_cos:
+        return index_matches
+
+    # Strategy 3: Positional matching
+    # Positional matching is permitted only when the survey and mapping contain exactly the same number of COs
+    if len(candidate_cols) == number_of_cos:
+        return list(candidate_cols)
+
+    # If alignment failed
+    if missing_co_by_index:
+        raise ValueError(f"Survey column for mapped CO '{missing_co_by_index}' was not found in the Survey Sheet.")
+    raise ValueError(
+        f"Could not unambiguously match survey columns to mapped COs ({len(candidate_cols)} candidate columns for {number_of_cos} mapped COs)."
+    )
+
+
+def process_indirect_survey(indirect_file, mapped_cos, base_threshold):
+    if indirect_file is None:
+        raise ValueError("Survey Sheet (Indirect Ratings) is required.")
+
+    survey_name = getattr(indirect_file, "filename", None)
+    if not survey_name and hasattr(indirect_file, "name"):
+        survey_name = getattr(indirect_file, "name")
+    if not survey_name:
+        survey_name = "Survey Sheet"
+
+    content = decode_csv_content(indirect_file, file_label=survey_name)
+    rows = list(csv.reader(io.StringIO(content)))
+    if not rows or not any(any(str(c).strip() for c in r) for r in rows):
+        raise ValueError("The uploaded Survey Sheet is empty.")
+
+    header_idx = find_survey_header_row(rows)
+    df_survey = _orig_module_read_csv(io.StringIO(content), header=header_idx)
+    df_survey.columns = df_survey.columns.astype(str).str.strip().str.upper()
+    df_survey = df_survey.loc[:, ~df_survey.columns.astype(str).str.contains("^UNNAMED", case=False, na=False)]
+
+    aligned_columns = align_survey_columns(df_survey.columns, mapped_cos)
+
+    for col in aligned_columns:
+        df_survey[col] = _module.pd.to_numeric(df_survey[col], errors="coerce")
+
+    df_survey_clean = df_survey.dropna(subset=aligned_columns, how="all")
+    if df_survey_clean.empty:
+        raise ValueError("The Survey Sheet contains no valid student responses.")
+
+    d_high = float(base_threshold) / 100.0
+    d_mid = (float(base_threshold) - 15.0) / 100.0
+    d_low = (float(base_threshold) - 30.0) / 100.0
+    s_high = d_high - 0.10
+    s_mid = d_mid - 0.10
+    s_low = d_low - 0.10
+
+    indirect_values = [
+        _module.compute_survey_attainment(df_survey_clean[col], s_low, s_mid, s_high)
+        for col in aligned_columns
+    ]
+
+    return indirect_values, df_survey_clean
 
 
 def _calculate_new_pos_with_survey(
-    mapping_file, direct_file, base_threshold, has_practical, practical_only=False
+    mapping_file, direct_file, base_threshold, has_practical, practical_only=False, indirect_file=None
 ):
     """Standard New-PO courses use 80:20; Only Practical uses 100:0."""
     results, df_map, df_direct, _empty_indirect, co_statements, practical_statements = (
@@ -175,33 +346,21 @@ def _calculate_new_pos_with_survey(
             co_statements, practical_statements,
         )
 
-    if not has_request_context():
-        raise RuntimeError(
-            "A survey upload is required for Standard Theory / Practical New-PO courses."
-        )
-    indirect_file = flask_request.files.get("indirect_file")
-    if indirect_file is None or not getattr(indirect_file, "filename", "").strip():
+    if indirect_file is None:
+        if not has_request_context():
+            raise RuntimeError(
+                "A survey upload is required for Standard Theory / Practical New-PO courses."
+            )
+        indirect_file = flask_request.files.get("indirect_file")
+
+    if indirect_file is None or not getattr(indirect_file, "filename", "file").strip():
         raise ValueError(
             "Survey Sheet (Indirect Ratings) is required for Standard Theory / Practical courses, including New POs."
         )
 
-    survey_bytes = indirect_file.stream.read()
-    indirect_file.stream.seek(0)
-    if not survey_bytes:
-        raise ValueError("The uploaded Survey Sheet is empty.")
-
-    survey_name = getattr(indirect_file, "filename", "Survey Sheet")
-    raw_survey = safe_read_csv(survey_bytes, header=None, dtype=object, file_label=survey_name)
     number_of_cos = len(co_statements)
     if number_of_cos == 0:
         raise ValueError("No CO statements were found in the mapping sheet.")
-
-    survey_header = _find_survey_header_row(raw_survey)
-    df_survey = safe_read_csv(survey_bytes, header=survey_header, file_label=survey_name)
-    df_survey.columns = df_survey.columns.astype(str).str.strip().str.upper()
-    df_survey = df_survey.loc[
-        :, ~df_survey.columns.astype(str).str.contains("^UNNAMED", case=False, na=False)
-    ]
 
     co_candidates = [column for column in df_map.columns if "CO" in str(column).upper()]
     if not co_candidates:
@@ -215,49 +374,11 @@ def _calculate_new_pos_with_survey(
             "The number of CO rows in the mapping sheet does not match the CO summary."
         )
 
-    survey_columns = [
-        column for column in df_survey.columns
-        if re.match(r"^C[A-Z0-9_-]*[._-]?\d+$", str(column).strip().upper())
-    ]
-    if len(survey_columns) < number_of_cos:
-        raise ValueError(
-            f"The Survey Sheet contains {len(survey_columns)} CO columns, but the mapping sheet has {number_of_cos} COs."
-        )
+    mapped_cos = theory_rows[co_column].astype(str).str.strip().tolist()
 
-    normalized_survey_columns = {
-        re.sub(r"\s+", "", str(column).strip().upper()): column
-        for column in survey_columns
-    }
-    aligned_columns = []
-    for index, co_row in theory_rows.iterrows():
-        co_code = re.sub(r"\s+", "", str(co_row[co_column]).strip().upper())
-        if co_code in normalized_survey_columns:
-            aligned_columns.append(normalized_survey_columns[co_code])
-        else:
-            if len(survey_columns) < number_of_cos:
-                raise ValueError(
-                    f"Survey column for {co_code} was not found. Add one survey column for each mapped CO."
-                )
-            aligned_columns.append(survey_columns[index])
-
-    if len(df_survey.columns) > 0:
-        df_survey = df_survey.dropna(subset=[df_survey.columns[0]])
-    for column in aligned_columns:
-        df_survey[column] = _module.pd.to_numeric(df_survey[column], errors="coerce")
-
-    direct_high = float(base_threshold) / 100.0
-    direct_mid = (float(base_threshold) - 15.0) / 100.0
-    direct_low = (float(base_threshold) - 30.0) / 100.0
-    survey_high = direct_high - 0.10
-    survey_mid = direct_mid - 0.10
-    survey_low = direct_low - 0.10
-
-    indirect_values = [
-        _module.compute_survey_attainment(
-            df_survey[column], survey_low, survey_mid, survey_high
-        )
-        for column in aligned_columns
-    ]
+    indirect_values, df_survey = process_indirect_survey(
+        indirect_file, mapped_cos, base_threshold
+    )
 
     for index, statement in enumerate(co_statements):
         raw_direct = float(statement.get("direct", 0.0))
@@ -313,6 +434,8 @@ def _calculate_new_pos_with_survey(
         row["indirect"] = f"{indirect_contribution:.4f}"
         row["final"] = f"{final_po:.4f}"
         row["percentage"] = f"{percentage:.2f}"
+
+    return results, df_map, df_direct, df_survey, co_statements, practical_statements
 
     return results, df_map, df_direct, df_survey, co_statements, practical_statements
 
