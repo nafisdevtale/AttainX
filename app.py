@@ -905,3 +905,6 @@ if upload_template.is_file():
     upload_template.write_text(template_text, encoding="utf-8")
 
 app = _module.app
+calculate_dashboard_old_pos = _module.calculate_dashboard_old_pos
+calculate_dashboard_new_pos = _module.calculate_dashboard_new_pos
+
