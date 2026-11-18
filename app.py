@@ -37,6 +37,94 @@ _module = module_from_spec(_spec)
 sys.modules[_spec.name] = _module
 _spec.loader.exec_module(_module)
 
+SUPPORTED_CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1252")
+
+
+def decode_csv_content(file_or_source, file_label=None):
+    filename = file_label
+    if not filename:
+        filename = getattr(file_or_source, "filename", None)
+    if not filename and hasattr(file_or_source, "name"):
+        filename = getattr(file_or_source, "name")
+    if not filename:
+        filename = "uploaded CSV file"
+
+    raw_bytes = None
+
+    if hasattr(file_or_source, "stream"):
+        stream = file_or_source.stream
+        try:
+            stream.seek(0)
+        except Exception:
+            pass
+        raw_bytes = stream.read()
+        try:
+            stream.seek(0)
+        except Exception:
+            pass
+        try:
+            file_or_source.seek(0)
+        except Exception:
+            pass
+    elif hasattr(file_or_source, "seek") and hasattr(file_or_source, "read"):
+        if isinstance(file_or_source, io.StringIO):
+            return file_or_source.getvalue()
+        try:
+            file_or_source.seek(0)
+        except Exception:
+            pass
+        raw_bytes = file_or_source.read()
+        try:
+            file_or_source.seek(0)
+        except Exception:
+            pass
+    elif isinstance(file_or_source, (bytes, bytearray)):
+        raw_bytes = bytes(file_or_source)
+    elif isinstance(file_or_source, str):
+        if Path(file_or_source).is_file():
+            filename = Path(file_or_source).name
+            raw_bytes = Path(file_or_source).read_bytes()
+        else:
+            return file_or_source
+    elif isinstance(file_or_source, Path) and file_or_source.is_file():
+        filename = file_or_source.name
+        raw_bytes = file_or_source.read_bytes()
+
+    if raw_bytes is None:
+        raise ValueError(f"Unable to read content from '{filename}': Unrecognized input type.")
+
+    for encoding in SUPPORTED_CSV_ENCODINGS:
+        try:
+            return raw_bytes.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            continue
+
+    raise ValueError(
+        f"Unable to decode '{filename}': invalid encoding. Supported encodings are UTF-8, "
+        f"UTF-8 with BOM, and Windows-1252 (CP1252). Please ensure the file is saved with a supported encoding."
+    )
+
+
+_orig_module_read_csv = getattr(_module.pd, "_orig_pd_read_csv", _module.pd.read_csv)
+
+
+def safe_read_csv(file_or_source, *args, **kwargs):
+    file_label = kwargs.pop("file_label", None)
+    if "encoding" in kwargs:
+        try:
+            return _orig_module_read_csv(file_or_source, *args, **kwargs)
+        except (UnicodeDecodeError, UnicodeError):
+            kwargs.pop("encoding", None)
+
+    decoded_text = decode_csv_content(file_or_source, file_label=file_label)
+    return _orig_module_read_csv(io.StringIO(decoded_text), *args, **kwargs)
+
+
+_module.SUPPORTED_CSV_ENCODINGS = SUPPORTED_CSV_ENCODINGS
+_module.decode_csv_content = decode_csv_content
+_module.safe_read_csv = safe_read_csv
+_module.pd.read_csv = safe_read_csv
+
 
 def _uncapped_target_attainment_percentage(final_score, target_score):
     if _module.pd.isna(target_score) or float(target_score) <= 0:
@@ -102,13 +190,14 @@ def _calculate_new_pos_with_survey(
     if not survey_bytes:
         raise ValueError("The uploaded Survey Sheet is empty.")
 
-    raw_survey = _module.pd.read_csv(io.BytesIO(survey_bytes), header=None, dtype=object)
+    survey_name = getattr(indirect_file, "filename", "Survey Sheet")
+    raw_survey = safe_read_csv(survey_bytes, header=None, dtype=object, file_label=survey_name)
     number_of_cos = len(co_statements)
     if number_of_cos == 0:
         raise ValueError("No CO statements were found in the mapping sheet.")
 
     survey_header = _find_survey_header_row(raw_survey)
-    df_survey = _module.pd.read_csv(io.BytesIO(survey_bytes), header=survey_header)
+    df_survey = safe_read_csv(survey_bytes, header=survey_header, file_label=survey_name)
     df_survey.columns = df_survey.columns.astype(str).str.strip().str.upper()
     df_survey = df_survey.loc[
         :, ~df_survey.columns.astype(str).str.contains("^UNNAMED", case=False, na=False)
@@ -502,8 +591,8 @@ def _write_old_pos_11_template(source_name, target_name):
     static_dir = APP_DIR / "public" / "static"
     source_path = static_dir / source_name
     target_path = static_dir / target_name
-    with source_path.open("r", newline="", encoding="utf-8-sig") as source_file:
-        rows = list(csv.reader(source_file))
+    content = decode_csv_content(source_path, file_label=source_name)
+    rows = list(csv.reader(io.StringIO(content)))
 
     header_index = next(
         (
