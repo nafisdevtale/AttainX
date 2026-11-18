@@ -326,6 +326,42 @@ def process_indirect_survey(indirect_file, mapped_cos, base_threshold):
     return indirect_values, df_survey_clean
 
 
+def extract_cos_from_mapping(mapping_source):
+    content = decode_csv_content(mapping_source, file_label="mapping_file")
+    rows = list(csv.reader(io.StringIO(content)))
+    header_idx = None
+    for idx, row in enumerate(rows):
+        if any("CO CODE" in str(c).upper() for c in row):
+            header_idx = idx
+            break
+    if header_idx is None:
+        raise ValueError("Could not find 'CO Codes' column in the mapping sheet.")
+
+    co_col_idx = next(i for i, c in enumerate(rows[header_idx]) if "CO" in str(c).upper())
+    co_codes = []
+    for row in rows[header_idx + 1:]:
+        if row and len(row) > co_col_idx:
+            val = str(row[co_col_idx]).strip()
+            if val and val.upper().startswith("C"):
+                co_codes.append(val)
+    if not co_codes:
+        raise ValueError("No Course Outcomes starting with 'C' found in the mapping sheet.")
+    return co_codes
+
+
+def generate_survey_template_csv(co_codes):
+    if not co_codes:
+        raise ValueError("At least one Course Outcome (CO) is required to generate a survey template.")
+    pad = "," * len(co_codes)
+    line1 = f",Survey for Indirect Attainment Only{pad}"
+    line2 = "Sr. No.,Name ," + ",".join(co_codes)
+    return f"\ufeff{line1}\r\n{line2}\r\n"
+
+
+_module.extract_cos_from_mapping = extract_cos_from_mapping
+_module.generate_survey_template_csv = generate_survey_template_csv
+
+
 def _calculate_new_pos_with_survey(
     mapping_file, direct_file, base_threshold, has_practical, practical_only=False, indirect_file=None
 ):
@@ -434,8 +470,6 @@ def _calculate_new_pos_with_survey(
         row["indirect"] = f"{indirect_contribution:.4f}"
         row["final"] = f"{final_po:.4f}"
         row["percentage"] = f"{percentage:.2f}"
-
-    return results, df_map, df_direct, df_survey, co_statements, practical_statements
 
     return results, df_map, df_direct, df_survey, co_statements, practical_statements
 
