@@ -905,43 +905,31 @@ if upload_template.is_file():
     upload_template.write_text(template_text, encoding="utf-8")
 
 
-# Keep mapping-file selection lightweight in the browser. CSV parsing and
-# CO extraction happen server-side when the survey template is requested.
+# Keep mapping-file selection lightweight in the browser. Mapping CSVs are
+# parsed on the Flask side; do not display redundant status text below uploads.
 if upload_template.is_file():
     _mapping_upload_fix = r"""
 <script id="attainx-mapping-upload-fix">
 (function () {
-    function showSurveyMessage(message, isError) {
-        var box = document.getElementById("survey_generation_msg");
-        if (!box) return;
-        box.textContent = message || "";
-        box.style.display = message ? "block" : "none";
-        box.style.color = isError ? "#dc3545" : "#0056b3";
+    function removeUploadStatusText() {
+        ["mapping_status_msg", "survey_generation_msg"].forEach(function (id) {
+            var element = document.getElementById(id);
+            if (element) element.remove();
+        });
     }
 
-    window.handleMappingFileSelect = function (input) {
-        var status = document.getElementById("mapping_status_msg");
-        var file = input && input.files && input.files.length ? input.files[0] : null;
-        if (!file) {
-            if (status) {
-                status.textContent = "";
-                status.style.display = "none";
-            }
-            showSurveyMessage("", false);
-            return;
-        }
-        if (status) {
-            status.textContent = "✓ Mapping file selected: " + file.name;
-            status.style.display = "block";
-        }
-        showSurveyMessage(
-            "Mapping file selected. The survey template will use its CO codes.",
-            false
-        );
+    // The native file input already shows the selected filename. No extra
+    // confirmation paragraph is needed beneath the Mapping upload.
+    window.handleMappingFileSelect = function () {
+        removeUploadStatusText();
     };
 
+    // Generate the survey template using the selected Mapping CSV, without
+    // reading/parsing that file in the browser or inserting status wording.
     window.downloadDynamicSurveyTemplate = function (event) {
         if (event) event.preventDefault();
+
+        removeUploadStatusText();
 
         var input = document.getElementById("mapping_file");
         var format = document.getElementById("po_format");
@@ -963,14 +951,11 @@ if upload_template.is_file():
             link.style.pointerEvents = "none";
             link.style.opacity = "0.65";
         }
-        showSurveyMessage("Preparing the subject-specific survey template...", false);
 
         fetch(url, options)
             .then(function (response) {
                 if (!response.ok) {
-                    return response.text().then(function (body) {
-                        throw new Error(body || ("HTTP " + response.status));
-                    });
+                    throw new Error("Survey template request failed (HTTP " + response.status + ").");
                 }
                 var disposition = response.headers.get("Content-Disposition") || "";
                 var match = disposition.match(/filename\s*=\s*["']?([^;"']+)/i);
@@ -987,15 +972,11 @@ if upload_template.is_file():
                     window.setTimeout(function () {
                         URL.revokeObjectURL(objectUrl);
                     }, 1000);
-                    showSurveyMessage("✓ Survey template downloaded successfully.", false);
                 });
             })
             .catch(function (error) {
-                showSurveyMessage(
-                    "Survey template could not be generated: " +
-                    (error && error.message ? error.message : "Unknown error."),
-                    true
-                );
+                console.error("AttainX survey-template generation failed:", error);
+                window.alert("Unable to generate the Survey Template. Check the Mapping CSV and try again.");
             })
             .then(function () {
                 if (link) {
@@ -1003,6 +984,7 @@ if upload_template.is_file():
                     link.style.pointerEvents = "";
                     link.style.opacity = "";
                 }
+                removeUploadStatusText();
             });
 
         return false;
@@ -1014,10 +996,13 @@ if upload_template.is_file():
             window.handleMappingFileSelect(this);
         };
     }
+
     var surveyLink = document.getElementById("indirect_template_link");
     if (surveyLink) {
         surveyLink.onclick = window.downloadDynamicSurveyTemplate;
     }
+
+    removeUploadStatusText();
 })();
 </script>
 """
@@ -1030,7 +1015,6 @@ if upload_template.is_file():
         else:
             _template_text += "\n" + _mapping_upload_fix
         upload_template.write_text(_template_text, encoding="utf-8")
-
 
 app = _module.app
 calculate_dashboard_old_pos = _module.calculate_dashboard_old_pos
